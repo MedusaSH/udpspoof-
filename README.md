@@ -2,9 +2,8 @@
 
 ![logo](https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fuser-images.githubusercontent.com%2F42814853%2F180027603-514401ba-d6bb-425a-892c-0bc50bf38310.png&f=1&nofb=1&ipt=02524c650c97aa28f1e937140cc5c83efd73532c22fca7780f521907d97a8a65)
 
-Une simple POC montrant comment bypass toutes les protections des serveurs FiveM en envoyant des paquets UDP spoofés avec une IP source falsifiée issue d’un fichier `range.txt` contenant les blocs IP des opérateurs français, ciblant ainsi intelligemment les serveurs localisés en France.
-
----
+<strong>Une simple POC montrant comment bypass toutes les protections des serveurs FiveM en envoyant des paquets UDP spoofés avec une IP source falsifiée issue d’un fichier `range.txt` contenant les blocs IP des opérateurs français, ciblant ainsi intelligemment les serveurs localisés en France.</strong>
+<hr>
 
 ## 📌 Description
 
