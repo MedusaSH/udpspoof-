@@ -32,12 +32,10 @@ Le serveur ne vérifie pas l’authenticité de l’IP source au niveau transpor
 ## 🔬 Détails techniques
 
 - Utilise un **raw socket** pour créer manuellement des paquets IP/UDP.
-- Les paquets envoyés contiennent un payload `"ÿÿÿÿgetinfo.xyz"`, qui simule une requête classique de client.
+- Les paquets envoyés contiennent un payload `getinfo.xyz"`, qui simule une requête classique de client.
 - Le header IP est forgé à la main avec un checksum recalculé à chaque paquet.
 - Les IP source sont tirées dynamiquement du fichier `range.txt` pour maximiser la légitimité du spoof.
 - L’envoi est multithreadé et rate-limité pour éviter les détections simples par analyse du trafic.
 
----
 
-## 📂 Structure du projet
 
