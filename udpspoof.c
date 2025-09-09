@@ -62,9 +62,9 @@ uint32_t rand_cmwc(void) {
 }
 
 
-unsigned short csum(unsigned short *buf, int nwords) {
+unsigned short csum(unsigned short *buf, int lol) {
   unsigned long sum;
-  for (sum = 0; nwords > 0; nwords--)
+  for (sum = 0; lol > 0; lol--)
     sum += *buf++;
   sum = (sum >> 16) + (sum & 0xffff);
   sum += (sum >> 16);
@@ -213,3 +213,4 @@ int main(int argc, char *argv[]) {
   }
   return 0;
 }
+
